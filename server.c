@@ -13,8 +13,29 @@
 #define TRUE 1
 
 #define CTRL_STMT_SIZE 4
+#define MAX_MSG_SIZE 256
+
+#define NO_CON_MSG_SIZE 7
   
 volatile int STOP = FALSE;
+
+
+
+
+   /**
+      defines how many control statements be checked. You have to edit this value to the number of control statements you want to check for.
+   */
+   int num_ctrl_stmts = 4;
+
+/**
+      defines the control statements. You have to add your control statement as a char sequence of 4 chars.
+   */
+   char **ctrl_stmts = (char **) malloc(num_ctrl_stmts * sizeof(char *));
+   
+   ctrl_stmts[0] = "(0,0,0)"; // not connected
+   ctrl_stmts[1] = "STOP"; // kill application
+   ctrl_stmts[2] = "spee"; // to modify speed
+   ctrl_stmts[3] = "dire"; // to modify direction
 
 
 
@@ -50,10 +71,21 @@ void action(int stmt_no, char *payload) {
    switch(stmt_no) {
    
    case 0:
-      setSpeed(payload);
+      // reset speed and direction to defaults
+      printf("no connection!");
+      setSpeed("0");
+      setDirection("50");
       break;
       
    case 1:
+      STOP = TRUE;
+      break;
+   
+   case 2:
+      setSpeed(payload);
+      break;
+      
+   case 3:
       setDirection(payload);
       break;
       
@@ -71,21 +103,15 @@ void action(int stmt_no, char *payload) {
 
 
 
-void checkConnection(int fd, char **stmts, int *response_sizes) {
+void checkConnection(int fd) {
 
-   struct termios oldtio, newtio;
-   // save current port settings
-   tcgetattr(fd, &oldtio);
-   
-   newtio.c_cc[VTIME] = 0;
-   
-   // set new port settings
-   tcflush(fd, TCIFLUSH);
-   tcsetattr(fd,TCSANOW,&newtio);
-   
-   
-   
-   
+   int num_write_cmds = 3;
+   char **write_cmds = (char **) malloc(num_write_cmds * sizeof(char *));
+   write_cmds[0] = "$$$"; // to enter command mode
+   write_cmds[1] = "GK\n"; // to check, whether a device is connected or not
+   write_cmds[2] = "---\n"; // to leave command mode
+
+      
    int n = 0, res;
    
    char buf[255];
@@ -132,11 +158,39 @@ void checkConnection(int fd, char **stmts, int *response_sizes) {
    printf("msg: [%s]\n", buf);
    
    printf("command mode off!\n--------------------------\n");
+
    
+}
+
+
+
+void parseMsg(char *buf, int length) {
    
-   // restore saved port settings
-   tcsetattr(fd, TCSANOW, &oldtio);
+   int found = FALSE;
    
+   buf[length] = 0;
+   if(strncmp(buf, ctrl_stmts[0], NO_CON_MSG_SIZE) == 0) {
+      found = TRUE;
+      action(0, &buf[CTRL_STMT_SIZE]);
+   }
+   
+   for(i = 1; i < num_ctrl_stmts; i++) {
+      if(strncmp(buf, ctrl_stmts[i], CTRL_STMT_SIZE) == 0) {
+         printf("received control statement '%s'\n", read_buf);
+
+         printf("payload: '%s'\n", &buf[CTRL_STMT_SIZE]);
+
+         action(i, &buf[CTRL_STMT_SIZE]);
+
+         found = TRUE;
+
+         break;
+      }
+   }
+   
+   if(found == FALSE) {
+      printf("control statement '%c%c%c%c' does not exist!\n", buf[0], buf[1], buf[2], buf[3]);
+   }
 }
 
 
@@ -145,13 +199,14 @@ void *listenBluetooth() {
 
    
 
-   int fd;
+   int fd, n;
 
    /**
       defines the maximum payload size. You should change the value to be able to receive a payload greater than 255 chars.
    */
    char read_buf[255];
    char write_buf[255];
+   char c;
 
    fd = open(MODEMDEVICE, O_RDWR | O_NOCTTY ); 
    if (fd <0) {perror(MODEMDEVICE); exit(-1); }
@@ -192,7 +247,7 @@ void *listenBluetooth() {
    newtio.c_cc[VLNEXT]   = 0;     // Ctrl-v
    newtio.c_cc[VEOL2]    = 0;     // '\0'
    */
-   newtio.c_cc[VTIME]    = 30;     // timeout reading the next characters (10th of sec)
+   newtio.c_cc[VTIME]    = 0;     // timeout reading the next characters (10th of sec)
    newtio.c_cc[VMIN]     = 0;     // defines how many character to be read
 
    // set new port settings
@@ -201,6 +256,8 @@ void *listenBluetooth() {
    
    //checkConnection(fd, write_cmds, response_sizes);
 
+
+   /*
    // loop for input
    while (STOP==FALSE) {
    
@@ -248,7 +305,29 @@ void *listenBluetooth() {
       //printf(":%s\n", buf);
       //if (buf[0]=='q') STOP=TRUE;
    }
+   */
    
+   n = 0;
+   while(STOP == FALSE)
+   {
+   
+      res = read(fd, &c, 1);
+      if(c != '\n' && n < MAX_MSG_SIZE)
+      {
+         read_buf[n] = c;
+         n++;
+      }
+      else if(c == '\n')
+      {
+         parseMsg(read_buf, n);
+         n = 0;
+      }
+      
+      if(STOP == TRUE) {
+         break;
+      }
+   
+   }
    
    
    // restore saved port settings
@@ -259,43 +338,26 @@ void *listenBluetooth() {
  
 void main() {
 
-   int res, i, found = FALSE, err;
+   int res, i, err;
    struct termios oldtio, newtio;
    
    
    
-   /**
-      defines how many control statements be checked. You have to edit this value to the number of control statements you want to check for.
-   */
-   int num_ctrl_stmts = 2;
+
    
    /**
       defines the payload sizes for each control statement. You have to add the payload size as number of chars for your control statement.
    */
-   int *data_sizes = (int *) malloc(num_ctrl_stmts * sizeof(int));
-   data_sizes[0] = 3;
-   data_sizes[1] = 3;
-   
-   /**
-      defines the control statements. You have to add your control statement as a char sequence of 4 chars.
-   */
-   char **ctrl_stmts = (char **) malloc(num_ctrl_stmts * sizeof(char *));
-   ctrl_stmts[0] = "spee";
-   ctrl_stmts[1] = "dire";
-   
-   
-   int num_write_cmds = 3;
-   char **write_cmds = (char **) malloc(num_write_cmds * sizeof(char *));
-   write_cmds[0] = "$$$"; // to enter command mode
-   write_cmds[1] = "GK\n"; // to check, whether a device is connected or not
-   write_cmds[2] = "---\n"; // to leave command mode
-   
-   
+   //int *data_sizes = (int *) malloc(num_ctrl_stmts * sizeof(int));
+   //data_sizes[0] = 3;
+   //data_sizes[1] = 3;
+
+   /*
    int *response_sizes = (int *) malloc(num_write_cmds * sizeof(int));
    response_sizes[0] = 5; // define response size for write_cmds[0]
    response_sizes[1] = 4; // define response size for write_cmds[1]
    response_sizes[2] = 7; // define response size for write_cmds[2]
-   
+   */
    
   
    pthread_t btThread;
