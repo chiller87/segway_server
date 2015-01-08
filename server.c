@@ -25,17 +25,14 @@ volatile int STOP = FALSE;
    /**
       defines how many control statements be checked. You have to edit this value to the number of control statements you want to check for.
    */
-   int num_ctrl_stmts = 4;
+   int num_ctrl_stmts;
 
 /**
       defines the control statements. You have to add your control statement as a char sequence of 4 chars.
    */
-   char **ctrl_stmts = (char **) malloc(num_ctrl_stmts * sizeof(char *));
+   char **ctrl_stmts;
    
-   ctrl_stmts[0] = "(0,0,0)"; // not connected
-   ctrl_stmts[1] = "STOP"; // kill application
-   ctrl_stmts[2] = "spee"; // to modify speed
-   ctrl_stmts[3] = "dire"; // to modify direction
+
 
 
 
@@ -67,25 +64,45 @@ void setDirection(char *val) {
    
    Here you should add a new case with the index of your control statement.
 */
-void action(int stmt_no, char *payload) {
+void action(int stmt_no, char *payload, int fd) {
    switch(stmt_no) {
    
    case 0:
-      // reset speed and direction to defaults
-      printf("no connection!");
-      setSpeed("0");
-      setDirection("50");
+      checkConnection(fd, 0);
       break;
-      
+   
    case 1:
-      STOP = TRUE;
+      //printf("command mode on\n");
+      checkConnection(fd, 1);
       break;
    
    case 2:
+      //printf("command mode off!\n");
+      break;
+   
+   case 3:
+      // reset speed and direction to defaults
+      printf("no connection!\n");
+      setSpeed("0");
+      setDirection("50");
+      checkConnection(fd, 2);
+      break;
+   
+   case 4:
+      // connection still alive
+      printf("connection alive!\n");
+      checkConnection(fd, 2);
+      break;
+      
+   case 5:
+      STOP = TRUE;
+      break;
+   
+   case 6:
       setSpeed(payload);
       break;
       
-   case 3:
+   case 7:
       setDirection(payload);
       break;
       
@@ -103,7 +120,7 @@ void action(int stmt_no, char *payload) {
 
 
 
-void checkConnection(int fd) {
+void checkConnection(int fd, int mode) {
 
    int num_write_cmds = 3;
    char **write_cmds = (char **) malloc(num_write_cmds * sizeof(char *));
@@ -111,76 +128,37 @@ void checkConnection(int fd) {
    write_cmds[1] = "GK\n"; // to check, whether a device is connected or not
    write_cmds[2] = "---\n"; // to leave command mode
 
-      
-   int n = 0, res;
    
-   char buf[255];
+   int n = 0, res, i;
    
-   for(n = 0; stmts[0][n] != '\0'; n++);
-   printf("cmd = %s\n", stmts[0]);
-   printf("n = %d\n", n);
-   write(fd, stmts[0], n);
-   
-   res = read(fd, buf, response_sizes[0]);
-   buf[res] = 0;
-   printf("msg: %s\n", buf);
-   
-   printf("command mode on!\n-------------------------\n");
+   n = strlen(write_cmds[mode]);
+   //printf("cmd = %s\n", write_cmds[mode]);
+   //printf("n = %d\n", n);
+   write(fd, write_cmds[mode], n);
 
-   sleep(2);
    
    
-   
-   for(n = 0; stmts[1][n] != '\0'; n++);
-   printf("cmd = %s\n", stmts[1]);
-   printf("n = %d\n", n);
-   write(fd, stmts[1], n);
-   
-   sleep(2);
-   
-   res = read(fd, buf, response_sizes[1]);
-   printf("read %d character\n", res);
-   buf[res] = 0;
-   printf("msg: [%s]\n", buf);
-   
-   printf("query finished!\n-------------------------\n");
-   
-   sleep(2);
-   
-   for(n = 0; stmts[2][n] != '\0'; n++);
-   printf("cmd = %s\n", stmts[2]);
-   printf("n = %d\n", n);
-   write(fd, stmts[2], n);
-   
-   res = read(fd, buf, response_sizes[2]);
-   printf("read %d character\n", res);
-   buf[res] = 0;
-   printf("msg: [%s]\n", buf);
-   
-   printf("command mode off!\n--------------------------\n");
-
    
 }
 
 
 
-void parseMsg(char *buf, int length) {
+void parseMsg(char *buf, int length, int fd) {
    
-   int found = FALSE;
+   int found = FALSE, i;
    
-   buf[length] = 0;
-   if(strncmp(buf, ctrl_stmts[0], NO_CON_MSG_SIZE) == 0) {
-      found = TRUE;
-      action(0, &buf[CTRL_STMT_SIZE]);
-   }
    
-   for(i = 1; i < num_ctrl_stmts; i++) {
-      if(strncmp(buf, ctrl_stmts[i], CTRL_STMT_SIZE) == 0) {
-         printf("received control statement '%s'\n", read_buf);
+   //printf("got message '%s'\n", buf);
+   
+   for(i = 0; i < num_ctrl_stmts; i++) {
+      if(strncmp(buf, ctrl_stmts[i], strlen(ctrl_stmts[i])) == 0) {
+         //printf("received control statement '%s'\n", ctrl_stmts[i]);
 
-         printf("payload: '%s'\n", &buf[CTRL_STMT_SIZE]);
+         //printf("payload: '%s'\n", &buf[CTRL_STMT_SIZE]);
 
-         action(i, &buf[CTRL_STMT_SIZE]);
+
+         action(i, &buf[CTRL_STMT_SIZE], fd);
+
 
          found = TRUE;
 
@@ -189,8 +167,10 @@ void parseMsg(char *buf, int length) {
    }
    
    if(found == FALSE) {
-      printf("control statement '%c%c%c%c' does not exist!\n", buf[0], buf[1], buf[2], buf[3]);
+      printf("message '%s' could not be interpreted\n", buf);
    }
+   
+   printf("\n");
 }
 
 
@@ -198,8 +178,8 @@ void parseMsg(char *buf, int length) {
 void *listenBluetooth() {
 
    
-
-   int fd, n;
+   struct termios oldtio, newtio;
+   int fd, n, res;
 
    /**
       defines the maximum payload size. You should change the value to be able to receive a payload greater than 255 chars.
@@ -230,102 +210,66 @@ void *listenBluetooth() {
     default values can be found in /usr/include/termios.h, and are given
     in the comments, but we don't need them here
    */
-   /*
-   newtio.c_cc[VINTR]    = 0;     // Ctrl-c 
-   newtio.c_cc[VQUIT]    = 0;     // Ctrl-\ //
-   newtio.c_cc[VERASE]   = 0;     // del
-   newtio.c_cc[VKILL]    = 0;     // @
-   newtio.c_cc[VEOF]     = 4;     // Ctrl-d
-   newtio.c_cc[VSWTC]    = 0;     // '\0'
-   newtio.c_cc[VSTART]   = 0;     // Ctrl-q 
-   newtio.c_cc[VSTOP]    = 0;     // Ctrl-s
-   newtio.c_cc[VSUSP]    = 0;     // Ctrl-z
-   newtio.c_cc[VEOL]     = 0;     // '\0'
-   newtio.c_cc[VREPRINT] = 0;     // Ctrl-r
-   newtio.c_cc[VDISCARD] = 0;     // Ctrl-u
-   newtio.c_cc[VWERASE]  = 0;     // Ctrl-w
-   newtio.c_cc[VLNEXT]   = 0;     // Ctrl-v
-   newtio.c_cc[VEOL2]    = 0;     // '\0'
-   */
-   newtio.c_cc[VTIME]    = 0;     // timeout reading the next characters (10th of sec)
+
+   newtio.c_cc[VTIME]    = 10;     // timeout reading the next characters (10th of sec)
    newtio.c_cc[VMIN]     = 0;     // defines how many character to be read
 
    // set new port settings
    tcflush(fd, TCIFLUSH);
    tcsetattr(fd,TCSANOW,&newtio);
-   
-   //checkConnection(fd, write_cmds, response_sizes);
 
-
-   /*
-   // loop for input
-   while (STOP==FALSE) {
-   
-      // reset found
-      found = FALSE;
-      
-      // read control statement
-      res = read(fd, read_buf, CTRL_STMT_SIZE);
-      
-      // so we can printf...
-      read_buf[res] = 0;
-      
-      
-      for(i = 0; i < num_ctrl_stmts; i++) {
-         
-         if(strncmp(read_buf, ctrl_stmts[i], 4) == 0) {
-            printf("received control statement '%s'\n", read_buf);
-            
-            // read payload
-            res = read(fd, read_buf, data_sizes[0]);
-            // so we can printf...
-            read_buf[res] = 0;
-            
-            printf("payload: '%s'\n", read_buf);
-            
-            action(i, read_buf);
-            
-            found = TRUE;
-            
-            break;
-         }
-      }
-      
-      if(found == FALSE) {
-         printf("control statement '%s' does not exist!\n", read_buf);
-         
-         // read rest of unknown message
-         res = read(fd, read_buf, sizeof(read_buf));
-         read_buf[res] = 0;
-         printf("rest: %s\n", read_buf);
-      }
-      
-
-      // print the received msg
-      //printf(":%s\n", buf);
-      //if (buf[0]=='q') STOP=TRUE;
-   }
-   */
    
    n = 0;
+   int count = 0;
+   int blah = 0;
+   int timeout = 0;
    while(STOP == FALSE)
    {
    
       res = read(fd, &c, 1);
-      if(c != '\n' && n < MAX_MSG_SIZE)
-      {
-         read_buf[n] = c;
-         n++;
+      //printf("res = %d\n", res);
+      
+      if(res == 0) {
+         printf("nothing\n");
+         timeout++;
+         if(timeout >= 1) {
+            checkConnection(fd, 0);
+            timeout = 0;
+         }
       }
-      else if(c == '\n')
-      {
-         parseMsg(read_buf, n);
-         n = 0;
+      
+      else {
+         switch(c) {
+            case '\r':
+               //printf("backslash r received\n");
+               break;
+               
+            case '\n':
+               if(n > 0) {
+                  read_buf[n] = '\0';
+                  parseMsg(read_buf, n, fd);
+                  n = 0;
+               }
+               else {
+                  //printf("moep\n");
+               }
+               break;
+               
+            default:
+               read_buf[n] = c;
+               n++;
+               timeout = 0;
+               break;
+         }
       }
       
       if(STOP == TRUE) {
+         setSpeed("0");
+         setDirection("50");
          break;
       }
+      
+      //printf("blahblah blub %d\n", blah++);
    
    }
    
@@ -339,26 +283,20 @@ void *listenBluetooth() {
 void main() {
 
    int res, i, err;
-   struct termios oldtio, newtio;
    
    
-   
+   num_ctrl_stmts = 8;
+   ctrl_stmts = (char **) malloc(num_ctrl_stmts * sizeof(char *));
+   ctrl_stmts[0] = "CHECK"; // to check bluetooth connection
+   ctrl_stmts[1] = "CMD"; // command mode on
+   ctrl_stmts[2] = "END"; // command mode off
+   ctrl_stmts[3] = "0,0,0"; // not connected
+   ctrl_stmts[4] = "1,0,0"; // connected
+   ctrl_stmts[5] = "STOP"; // kill application
+   ctrl_stmts[6] = "spee"; // modify speed
+   ctrl_stmts[7] = "dire"; // modify direction
+  
 
-   
-   /**
-      defines the payload sizes for each control statement. You have to add the payload size as number of chars for your control statement.
-   */
-   //int *data_sizes = (int *) malloc(num_ctrl_stmts * sizeof(int));
-   //data_sizes[0] = 3;
-   //data_sizes[1] = 3;
-
-   /*
-   int *response_sizes = (int *) malloc(num_write_cmds * sizeof(int));
-   response_sizes[0] = 5; // define response size for write_cmds[0]
-   response_sizes[1] = 4; // define response size for write_cmds[1]
-   response_sizes[2] = 7; // define response size for write_cmds[2]
-   */
-   
   
    pthread_t btThread;
    
@@ -368,6 +306,8 @@ void main() {
    {
       printf("Konnte Thread nicht erzeugen\n");
    }
+   
+   
    
    pthread_join(btThread, NULL);
    
