@@ -1,9 +1,9 @@
 # the compiler to use.
 CC=gcc
 # options to pass to the compiler.
-CFLAGS=-c -Wall -O3 -funroll-loops -funroll-all-loops -lpthread
+CFLAGS=-c -Wall -O3 -funroll-loops -funroll-all-loops
 # options to pass to the linker
-LDFLAGS=`pkg-config --cflags --libs opencv` -lm
+LDFLAGS=`pkg-config --cflags --libs opencv` -lm -lpthread
 # the soure files
 SOURCES=server.c
 # the object files
