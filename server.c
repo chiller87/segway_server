@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <unistd.h>
+#include <string.h>
   
 #define BAUDRATE B115200 // define BAUD rate
 #define MODEMDEVICE "/dev/ttyUSB0" // define serial port
@@ -34,6 +36,16 @@ char **ctrl_stmts;
 
 
 
+void checkConnection(int fd, int mode);
+int doCalculation(char *params);
+void setSpeed(char *val);
+void setDirection(char *val);
+void sendMessage(int fd, char* msg);
+void action(int stmt_no, char *payload, int fd);
+void parseMsg(char *buf, int length, int fd);
+void *listenBluetooth();
+
+
 
 int doCalculation(char *params) {
 	int val = atoi(params);
@@ -45,7 +57,7 @@ int doCalculation(char *params) {
 void setSpeed(char *val) {
    int s = atoi(val);
 
-   printf("set speed to '%d\%'\n", s);
+   printf("set speed to '%d'\n", s);
 }
 
 
@@ -59,7 +71,9 @@ void setDirection(char *val) {
 
 
 void sendMessage(int fd, char* msg) {
-	write(fd, msg, strlen(msg));
+	int bytes = write(fd, msg, strlen(msg));
+	if(bytes == -1)
+		printf("error writing!\n");
 }
 
 
@@ -147,12 +161,14 @@ void checkConnection(int fd, int mode) {
    write_cmds[2] = "---\n"; // to leave command mode
 
    
-   int n = 0, res, i;
+   int n = 0;
    
    n = strlen(write_cmds[mode]);
    printf("cmd = %s\n", write_cmds[mode]);
    //printf("n = %d\n", n);
-   write(fd, write_cmds[mode], n);
+   int bytes = write(fd, write_cmds[mode], n);
+   if(bytes == -1)
+		printf("error writing!\n");
 
 }
 
@@ -211,7 +227,6 @@ void *listenBluetooth() {
 	  defines the maximum payload size. You should change the value to be able to receive a payload greater than 255 chars.
    */
    char read_buf[255];
-   char write_buf[255];
    char c;
 
    fd = open(MODEMDEVICE, O_RDWR | O_NOCTTY ); 
@@ -246,8 +261,6 @@ void *listenBluetooth() {
 
    
    n = 0;
-   int count = 0;
-   int blah = 0;
    int timeout = 0;
    while(STOP == FALSE)
    {
@@ -303,13 +316,15 @@ void *listenBluetooth() {
    
    // restore saved port settings
    tcsetattr(fd, TCSANOW, &oldtio);
+
+   return NULL;
 }
 
 
  
-void main() {
+int main() {
 
-   int res, i, err;
+   int err;
    
    
    num_ctrl_stmts = 9;
@@ -339,6 +354,7 @@ void main() {
    
    pthread_join(btThread, NULL);
    
+   return 0;
    
 }
 
