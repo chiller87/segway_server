@@ -73,7 +73,9 @@ void *listenBluetooth();
 	dummy function to do some calculation
 */
 int doCalculation(char *params) {
+	
 	int val = atoi(params);
+	printf("got value '%d'\n", val);
 	return val * 5;
 }
 
@@ -103,7 +105,7 @@ void setDirection(char *val) {
 	function to send data passed in 'msg' over 'fd'
 */
 void sendMessage(int fd, char* msg) {
-	//printf("sending msg '%s'\n", msg);
+	printf("sending msg '%s'\n", msg);
 	int bytes = write(fd, msg, strlen(msg));
 	if(bytes == -1)
 		printf("error writing!\n");
@@ -218,7 +220,7 @@ void checkConnection(int fd, int mode) {
 
 	\param buf:		the received message
 	\param length:	the length of the message (command + payload)
-	\param fd:		file descriptor
+	\param fd:		file descriptor (serial USB)
 */
 void parseMsg(char *buf, int length, int fd) {
 
